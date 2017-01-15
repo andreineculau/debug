@@ -36,12 +36,13 @@ exports.storage = (function() {
           cb(items[key]);
         };
 
-        if (isFirefox) {
-          // Firefox uses the Promise pattern
-          browser.storage.local.get(key).then(cbProxy);
-        } else {
+        // going without user-agent sniffing
+        try {
           // Chrome/Opera/Edge use the callback pattern
           browser.storage.local.get(key, cbProxy);
+        } catch (_err) {
+          // Firefox uses the Promise pattern
+          browser.storage.local.get(key).then(cbProxy);
         }
       },
 
