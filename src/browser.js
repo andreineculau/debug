@@ -10,10 +10,66 @@ exports.formatArgs = formatArgs;
 exports.save = save;
 exports.load = load;
 exports.useColors = useColors;
-exports.storage = 'undefined' != typeof chrome
-               && 'undefined' != typeof chrome.storage
-                  ? chrome.storage.local
-                  : localstorage();
+
+var isFirefox = false;
+var isFirefoxNewerThan31 = false;
+var isAppleWebkit = false;
+
+if (typeof navigator !== 'undefined' &&
+    typeof navigator.userAgent !== 'undefined') {
+  isFirefox = navigator.userAgent.toLowerCase().match(/firefox\/(\d+)/)
+  isFirefoxNewerThan31 = isFirefox && parseInt(RegExp.$1, 10) >= 31;
+  isAppleWebkit = navigator.userAgent.toLowerCase().match(/applewebkit\/(\d+)/)
+}
+
+exports.storage = (function() {
+  var browser = window.browser || window.chrome;
+
+  if (typeof browser !== 'undefined' &&
+      typeof browser.storage !== 'undefined' &&
+      typeof browser.storage.local !== 'undefined') {
+
+    // maintain compatibility with localStorage
+    return {
+      get: function(key, cb) {
+        var cbProxy = function(items) {
+          cb(items[key]);
+        };
+
+        if (isFirefox) {
+          // Firefox uses the Promise pattern
+          browser.storage.local.get(key).then(cbProxy);
+        } else {
+          // Chrome/Opera/Edge use the callback pattern
+          browser.storage.local.get(key, cbProxy);
+        }
+      },
+
+      set: function(key, value) {
+        var items = {};
+        items[key] = value;
+        browser.storage.local.set(items);
+      },
+
+      remove: browser.storage.local.remove
+    };
+  }
+
+  if (window.localStorage) {
+    return {
+      get: function(key, cb) {
+        var value = window.localStorage.getItem(key);
+        cb(value);
+      },
+      set: function(key, value) {
+        window.localStorage.setItem(key, value);
+      },
+      remove: function(key) {
+        window.localStorage.removeItem(key);
+      }
+    };
+  }
+})();
 
 /**
  * Colors.
@@ -51,9 +107,9 @@ function useColors() {
     (typeof window !== 'undefined' && window && window.console && (console.firebug || (console.exception && console.table))) ||
     // is firefox >= v31?
     // https://developer.mozilla.org/en-US/docs/Tools/Web_Console#Styling_messages
-    (typeof navigator !== 'undefined' && navigator && navigator.userAgent && navigator.userAgent.toLowerCase().match(/firefox\/(\d+)/) && parseInt(RegExp.$1, 10) >= 31) ||
+    (isFirefoxNewerThan31) ||
     // double check webkit in userAgent just in case we are in a worker
-    (typeof navigator !== 'undefined' && navigator && navigator.userAgent && navigator.userAgent.toLowerCase().match(/applewebkit\/(\d+)/));
+    (isAppleWebkit)
 }
 
 /**
@@ -131,13 +187,11 @@ function log() {
  */
 
 function save(namespaces) {
-  try {
-    if (null == namespaces) {
-      exports.storage.removeItem('debug');
-    } else {
-      exports.storage.debug = namespaces;
-    }
-  } catch(e) {}
+  if (null == namespaces) {
+    exports.storage.remove('debug');
+  } else {
+    exports.storage.set('debug', namespaces);
+  }
 }
 
 /**
@@ -148,35 +202,19 @@ function save(namespaces) {
  */
 
 function load() {
-  try {
-    return exports.storage.debug;
-  } catch(e) {}
-
-  // If debug isn't set in LS, and we're in Electron, try to load $DEBUG
-  if (typeof process !== 'undefined' && 'env' in process) {
-    return process.env.DEBUG;
+  if (exports.storage) {
+    exports.storage.get('debug', exports.enable);
+  } else {
+    if (typeof process !== 'undefined' &&
+        typeof process.env !== 'undefined' &&
+        typeof process.env.DEBUG !== 'undefined') {
+      exports.enable(process.env.DEBUG);
+    }
   }
 }
 
 /**
- * Enable namespaces listed in `localStorage.debug` initially.
+ * Enable namespaces listed in the storage `debug`` initially.
  */
 
-exports.enable(load());
-
-/**
- * Localstorage attempts to return the localstorage.
- *
- * This is necessary because safari throws
- * when a user disables cookies/localstorage
- * and you attempt to access it.
- *
- * @return {LocalStorage}
- * @api private
- */
-
-function localstorage() {
-  try {
-    return window.localStorage;
-  } catch (e) {}
-}
+exports.load();
